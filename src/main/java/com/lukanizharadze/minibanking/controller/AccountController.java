@@ -1,6 +1,6 @@
 package com.lukanizharadze.minibanking.controller;
 
-import com.lukanizharadze.minibanking.dto.TransactionHistoryResponse;
+import com.lukanizharadze.minibanking.dto.*;
 import com.lukanizharadze.minibanking.service.TransactionService;
 import org.springframework.web.bind.annotation.*;
 import lombok.RequiredArgsConstructor;
@@ -8,14 +8,10 @@ import lombok.RequiredArgsConstructor;
 import com.lukanizharadze.minibanking.service.AccountService;
 import org.springframework.http.HttpStatus;
 
-import com.lukanizharadze.minibanking.dto.AccountResponse;
 import jakarta.validation.Valid;
-import com.lukanizharadze.minibanking.dto.OpenAccountRequest;
 
 import java.time.Instant;
 import java.util.List;
-
-import com.lukanizharadze.minibanking.dto.UpdateAccountOwnerNameRequest;
 
 @RestController
 @RequestMapping("/api/v1/accounts")
@@ -72,5 +68,10 @@ public class AccountController {
                 page,
                 size
         );
+    }
+
+    @GetMapping("/top")
+    public List<TopAccountResponse> findTopAccounts() {
+        return transactionService.findTopAccounts();
     }
 }

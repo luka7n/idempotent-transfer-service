@@ -1,5 +1,6 @@
 package com.lukanizharadze.minibanking.service;
 
+import com.lukanizharadze.minibanking.dto.TopAccountResponse;
 import com.lukanizharadze.minibanking.dto.TransactionHistoryResponse;
 import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,7 @@ import com.lukanizharadze.minibanking.model.TransactionFailureReason;
 import org.springframework.data.domain.Page;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.dao.DataIntegrityViolationException;
 import com.lukanizharadze.minibanking.exception.IdempotencyException;
@@ -35,7 +37,9 @@ public class TransactionService {
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
     private final TransactionMapper transactionMapper;
+
     private static final int MAX_PAGE_SIZE = 100;
+    private static final int TOP_ACCOUNTS_LIMIT = 5;
 
 
     @Transactional
@@ -174,6 +178,13 @@ public class TransactionService {
                 history.getSize(),
                 history.getTotalElements(),
                 history.getTotalPages()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public List<TopAccountResponse> findTopAccounts() {
+        return transactionRepository.findTopAccountsByTransactionCount(
+                PageRequest.of(0, TOP_ACCOUNTS_LIMIT)
         );
     }
 

@@ -1,5 +1,6 @@
 package com.lukanizharadze.minibanking.repository;
 
+import com.lukanizharadze.minibanking.dto.TopAccountResponse;
 import com.lukanizharadze.minibanking.entity.Transaction;
 import org.springframework.data.domain.Page;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -8,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 
 import org.springframework.data.domain.Pageable;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 public interface TransactionRepository extends JpaRepository<Transaction, Long> {
@@ -30,4 +32,21 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("toDate") Instant toDate,
             Pageable pageable
     );
+
+    @Query("""
+        select new com.lukanizharadze.minibanking.dto.TopAccountResponse(
+                account.id,
+                account.accountNumber,
+                account.ownerName,
+                count(tx.id)
+        )
+        from Account account
+        join Transaction tx
+          on tx.fromAccount = account or tx.toAccount = account
+        where tx.status = com.lukanizharadze.minibanking.model.TransactionStatus.SUCCESS
+        group by account.id, account.accountNumber, account.ownerName
+        order by count(tx.id) desc, account.id asc
+        """)
+
+    List<TopAccountResponse> findTopAccountsByTransactionCount(Pageable pageable);
 }
