@@ -2,6 +2,7 @@ package com.lukanizharadze.minibanking.exception;
 
 
 
+import com.lukanizharadze.minibanking.dto.TransactionResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -54,13 +55,27 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(SameAccountTransactionException.class)
+    public ProblemDetail handleSameAccountTransaction(SameAccountTransactionException ex) {
+        return createProblem(
+                HttpStatus.BAD_REQUEST,
+                ErrorCode.SAME_ACCOUNT_TRANSACTION,
+                ex.getMessage()
+        );
 
-
-    private ProblemDetail createProblem(HttpStatus status, ErrorCode code, String detail) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
-        problem.setProperty("code", code.name());
-        return problem;
     }
+
+    @ExceptionHandler(TransactionRejectedException.class)
+    public ProblemDetail handleTransactionRejected(TransactionRejectedException ex) {
+        return createProblem(
+                HttpStatus.UNPROCESSABLE_CONTENT,
+                ex.getReason().name(),
+                ex.getMessage()
+        );
+
+
+    }
+
 
     @ExceptionHandler(AccountNotEmptyException.class)
     public ProblemDetail handleAccountNotEmpty(AccountNotEmptyException ex) {
@@ -70,6 +85,18 @@ public class GlobalExceptionHandler {
                 ex.getMessage()
         );
     }
+
+    private ProblemDetail createProblem(HttpStatus status, ErrorCode code, String detail) {
+        return createProblem(status, code.name(), detail);
+    }
+
+    private ProblemDetail createProblem(HttpStatus status, String code, String detail) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
+        problem.setProperty("code", code);
+        return problem;
+    }
+
+
 
 
 }
