@@ -3,8 +3,6 @@ import com.lukanizharadze.minibanking.model.AccountStatus;
 import com.lukanizharadze.minibanking.model.Currency;
 import jakarta.persistence.*;
 import lombok.Getter;
-import org.hibernate.annotations.DialectOverride;
-import java.util.UUID;
 import java.math.BigDecimal;
 import java.time.Instant;
 
@@ -15,8 +13,8 @@ import java.time.Instant;
 @CheckConstraint(name = "check_account_balance_is_not_negative", constraint = "balance >= 0"))
 public class Account {
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
 
     @Column(name="owner_name", nullable = false, length = 50)
     private String ownerName;
