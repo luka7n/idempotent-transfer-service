@@ -61,4 +61,15 @@ public class GlobalExceptionHandler {
         problem.setProperty("code", code.name());
         return problem;
     }
+
+    @ExceptionHandler(AccountNotEmptyException.class)
+    public ProblemDetail handleAccountNotEmpty(AccountNotEmptyException ex) {
+        return createProblem(
+                HttpStatus.CONFLICT,
+                ErrorCode.ACCOUNT_NOT_EMPTY,
+                ex.getMessage()
+        );
+    }
+
+
 }
