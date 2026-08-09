@@ -1,25 +1,21 @@
 package com.lukanizharadze.minibanking.controller;
 
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.RequestMapping;
+import com.lukanizharadze.minibanking.dto.TransactionHistoryResponse;
+import com.lukanizharadze.minibanking.service.TransactionService;
+import org.springframework.web.bind.annotation.*;
 import lombok.RequiredArgsConstructor;
 
 import com.lukanizharadze.minibanking.service.AccountService;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.http.HttpStatus;
 
 import com.lukanizharadze.minibanking.dto.AccountResponse;
 import jakarta.validation.Valid;
-import org.springframework.web.bind.annotation.RequestBody;
 import com.lukanizharadze.minibanking.dto.OpenAccountRequest;
-import org.springframework.web.bind.annotation.GetMapping;
-import java.util.List;
-import org.springframework.web.bind.annotation.PathVariable;
 
-import org.springframework.web.bind.annotation.PatchMapping;
+import java.time.Instant;
+import java.util.List;
+
 import com.lukanizharadze.minibanking.dto.UpdateAccountOwnerNameRequest;
-import org.springframework.web.bind.annotation.DeleteMapping;
 
 @RestController
 @RequestMapping("/api/v1/accounts")
@@ -27,6 +23,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 public class AccountController {
 
     private final AccountService accountService;
+    private final TransactionService transactionService;
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -60,4 +57,20 @@ public class AccountController {
     }
 
 
+    @GetMapping("/{accountId}/transactions")
+    public TransactionHistoryResponse findAccountTransactions(
+            @PathVariable Long accountId,
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        return transactionService.findAccountHistory(
+                accountId,
+                from,
+                to,
+                page,
+                size
+        );
+    }
 }

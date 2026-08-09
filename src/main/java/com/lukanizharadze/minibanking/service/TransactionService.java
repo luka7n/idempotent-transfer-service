@@ -1,5 +1,6 @@
 package com.lukanizharadze.minibanking.service;
 
+import com.lukanizharadze.minibanking.dto.TransactionHistoryResponse;
 import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import com.lukanizharadze.minibanking.repository.AccountRepository;
@@ -17,12 +18,13 @@ import com.lukanizharadze.minibanking.model.AccountStatus;
 import com.lukanizharadze.minibanking.exception.TransactionRejectedException;
 import com.lukanizharadze.minibanking.model.TransactionFailureReason;
 
-
+import org.springframework.data.domain.Page;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Optional;
 import org.springframework.dao.DataIntegrityViolationException;
 import com.lukanizharadze.minibanking.exception.IdempotencyException;
-
+import org.springframework.data.domain.PageRequest;
 
 
 
@@ -33,6 +35,8 @@ public class TransactionService {
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
     private final TransactionMapper transactionMapper;
+    private static final int MAX_PAGE_SIZE = 100;
+
 
     @Transactional
     public TransactionResponse transfer(TransactionRequest request, String idempotencyKey) {
@@ -141,4 +145,36 @@ public class TransactionService {
     private Account getAccount(Long accountId) {
         return accountRepository.findById(accountId).orElseThrow(() -> new AccountNotFoundException(accountId));
     }
+
+    @Transactional(readOnly = true)
+    public TransactionHistoryResponse findAccountHistory(Long accountId, Instant fromDate, Instant toDate,
+                                                         int page, int size) {
+        if (!accountRepository.existsById(accountId)) {
+            throw new AccountNotFoundException(accountId);
+        }
+
+        int pageNumber = Math.max(page, 0);
+        int pageSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
+
+
+        Page<TransactionResponse> history = transactionRepository
+                .findHistory(
+                        accountId,
+                        fromDate,
+                        toDate,
+                        PageRequest.of(pageNumber, pageSize)
+                )
+                .map(transactionMapper::toResponse);
+
+
+
+        return new TransactionHistoryResponse(
+                history.getContent(),
+                history.getNumber(),
+                history.getSize(),
+                history.getTotalElements(),
+                history.getTotalPages()
+        );
+    }
+
 }
