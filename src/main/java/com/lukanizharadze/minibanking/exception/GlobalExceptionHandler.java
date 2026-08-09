@@ -5,6 +5,7 @@ package com.lukanizharadze.minibanking.exception;
 import com.lukanizharadze.minibanking.dto.TransactionResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.http.HttpStatus;
@@ -96,6 +97,23 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ProblemDetail handleMissingIdempotencyKey() {
+        return createProblem(
+                HttpStatus.BAD_REQUEST,
+                ErrorCode.IDEMPOTENCY_KEY_REQUIRED,
+                "Idempotency-Key header is required"
+        );
+
+    }
+    @ExceptionHandler(IdempotencyException.class)
+    public ProblemDetail handleIdempotencyConflict(IdempotencyException ex) {
+        return createProblem(
+                HttpStatus.CONFLICT,
+                ErrorCode.IDEMPOTENCY_KEY_CONFLICT,
+                ex.getMessage()
+        );
+    }
 
 
 

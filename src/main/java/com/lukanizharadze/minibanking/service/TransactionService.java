@@ -16,7 +16,12 @@ import com.lukanizharadze.minibanking.exception.AccountNotFoundException;
 import com.lukanizharadze.minibanking.model.AccountStatus;
 import com.lukanizharadze.minibanking.exception.TransactionRejectedException;
 import com.lukanizharadze.minibanking.model.TransactionFailureReason;
+
+
 import java.math.BigDecimal;
+import java.util.Optional;
+import org.springframework.dao.DataIntegrityViolationException;
+import com.lukanizharadze.minibanking.exception.IdempotencyException;
 
 
 
@@ -30,7 +35,17 @@ public class TransactionService {
     private final TransactionMapper transactionMapper;
 
     @Transactional
-    public TransactionResponse transfer(TransactionRequest request) {
+    public TransactionResponse transfer(TransactionRequest request, String idempotencyKey) {
+
+        Optional<Transaction> stored = transactionRepository.findByIdempotencyKey(idempotencyKey);
+        if (stored.isPresent()) {
+            return handleExistingTransaction(
+                    stored.get(),
+                    request,
+                    idempotencyKey
+            );
+        }
+
 
         if (request.fromAccountId().equals(request.toAccountId())) {
 
@@ -51,7 +66,13 @@ public class TransactionService {
         sourceAccount.debit(request.amount());
         destinationAccount.credit(request.amount());
 
-        Transaction transaction = transactionRepository.save(new Transaction(sourceAccount, destinationAccount, request.amount()));
+        Transaction transaction = saveTransaction(
+                sourceAccount,
+                destinationAccount,
+                request.amount(),
+                idempotencyKey
+        );
+
 
         return transactionMapper.toResponse(transaction);
 
@@ -83,6 +104,38 @@ public class TransactionService {
                     "Account " + sourceAccount.getId() + " doesnot have enough funds"
             );
         }
+    }
+
+    private Transaction saveTransaction(Account sourceAccount, Account destinationAccount, BigDecimal amount,
+                                        String idempotencyKey) {
+        try {
+            return transactionRepository.saveAndFlush(
+                    new Transaction(sourceAccount, destinationAccount, amount, idempotencyKey)
+            );
+        } catch (DataIntegrityViolationException ex) {
+            throw new IdempotencyException(
+                    "Idempotency key " + idempotencyKey + " is already in use",
+                    ex
+            );
+        }
+    }
+
+    private TransactionResponse handleExistingTransaction(Transaction stored,
+                                                        TransactionRequest request,
+                                                        String idempotencyKey) {
+        boolean sameParameters =
+                stored.getFromAccount().getId().equals(request.fromAccountId())
+                        && stored.getToAccount().getId().equals(request.toAccountId())
+                        && stored.getAmount().compareTo(request.amount()) == 0;
+
+        if (!sameParameters) {
+            throw new IdempotencyException(
+                    "Idempotency key " + idempotencyKey
+                            + " was already used with different parameters"
+            );
+        }
+
+        return transactionMapper.toResponse(stored);
     }
 
     private Account getAccount(Long accountId) {

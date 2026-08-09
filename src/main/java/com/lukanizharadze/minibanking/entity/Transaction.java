@@ -49,17 +49,21 @@ public class Transaction {
     @Column(name = "created_at", updatable = false, nullable = false)
     private Instant createdAt;
 
+    @Column(name = "idempotency_key", nullable = false, unique = true, updatable = false, length = 128)
+    private String idempotencyKey;
+
     protected Transaction() {
     }
 
 
 
 
-    public Transaction(Account fromAccount, Account toAccount, BigDecimal amount) {
+    public Transaction(Account fromAccount, Account toAccount, BigDecimal amount, String idempotencyKey) {
         this.fromAccount = fromAccount;
         this.toAccount = toAccount;
         this.amount = amount;
         this.status = TransactionStatus.SUCCESS;
+        this.idempotencyKey = idempotencyKey;
         this.createdAt = Instant.now();
     }
 }
