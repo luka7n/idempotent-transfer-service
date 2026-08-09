@@ -12,6 +12,7 @@ public record OpenAccountRequest(
 
         @NotNull
         @DecimalMin("0.00")
+        @Digits(integer = 18, fraction = 2)
         BigDecimal initialBalance,
 
         @NotNull

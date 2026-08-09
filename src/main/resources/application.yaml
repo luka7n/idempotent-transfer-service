@@ -7,6 +7,10 @@ spring:
     username: sa
     password:
 
+  mvc:
+    problemdetails:
+      enabled: true
+
   jpa:
     open-in-view: false
     hibernate:
@@ -27,6 +31,3 @@ logging:
   level:
     org.hibernate.SQL: debug
 
-mvc:
-  problemdetails:
-    enabled: true
