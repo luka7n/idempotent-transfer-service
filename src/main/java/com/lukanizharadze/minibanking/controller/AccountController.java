@@ -38,7 +38,7 @@ public class AccountController {
 
     @GetMapping
     public List<AccountResponse> findAccounts() {
-        return accountService.findActiveAccounts();
+        return accountService.findAccounts();
     }
 
     @GetMapping("/{accountId}")

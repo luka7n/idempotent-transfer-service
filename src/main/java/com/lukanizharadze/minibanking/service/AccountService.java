@@ -42,10 +42,9 @@ public class AccountService {
 
 
     @Transactional(readOnly = true)
-    public List<AccountResponse> findActiveAccounts() {
-        return accountRepository.findAccountsByStatus(AccountStatus.ACTIVE).stream()
-                .map(accountMapper::toResponse)
-                .toList();
+    public List<AccountResponse> findAccounts() {
+        return accountRepository.findAll().stream()
+                .map(accountMapper::toResponse).toList();
     }
 
 
