@@ -67,7 +67,7 @@ The database unique constraint still prevents a second successful debit.
 
 I checked the account, transfer, idempotency, history and rollback scenarios manually, but I did not finish automated integration tests.
 
-The optional Swagger, Docker, daily limit and request/response logging features were not implemented because of time.
+The optional Docker, daily limit and request/response logging features were not implemented because of time.
 
 
 
@@ -82,6 +82,8 @@ Java 21 is required.
 ```
 
 The API runs on `http://localhost:8081`.
+
+Swagger UI is available at `http://localhost:8081/swagger-ui.html`.
 
 The H2 console is available at `http://localhost:8081/h2-console`.
 
@@ -235,4 +237,3 @@ Invalid input, zero or negative amounts and same-account transfers return `400`.
 A missing account returns `404`.
 Closing an account that still has money and reusing an idempotency key with different parameters return `409`.
 Insufficient funds, closed accounts and currency mismatch return `422`.
-
