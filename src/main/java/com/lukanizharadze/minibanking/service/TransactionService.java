@@ -55,8 +55,18 @@ public class TransactionService {
             throw new SameAccountTransactionException(request.fromAccountId());
         }
 
-        Account sourceAccount = getAccount(request.fromAccountId());
-        Account destinationAccount = getAccount(request.toAccountId());
+        Account sourceAccount;
+        Account destinationAccount;
+
+        // Both rows are locked in ascending id order so that A -> B and B -> A cannot
+        // each hold one row while waiting for the other.
+        if (request.fromAccountId() < request.toAccountId()) {
+            sourceAccount = lockAccount(request.fromAccountId());
+            destinationAccount = lockAccount(request.toAccountId());
+        } else {
+            destinationAccount = lockAccount(request.toAccountId());
+            sourceAccount = lockAccount(request.fromAccountId());
+        }
 
         validateTransaction(
                 sourceAccount,
@@ -135,8 +145,9 @@ public class TransactionService {
         return transactionMapper.toResponse(stored);
     }
 
-    private Account getAccount(Long accountId) {
-        return accountRepository.findById(accountId).orElseThrow(() -> new AccountNotFoundException(accountId));
+    private Account lockAccount(Long accountId) {
+        return accountRepository.findByIdForUpdate(accountId)
+                .orElseThrow(() -> new AccountNotFoundException(accountId));
     }
 
     @Transactional(readOnly = true)
