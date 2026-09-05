@@ -63,4 +63,13 @@ public class Transaction {
         this.idempotencyKey = idempotencyKey;
         this.createdAt = Instant.now();
     }
+
+    public static Transaction failed(Account fromAccount, Account toAccount, BigDecimal amount,
+                                     String idempotencyKey, TransactionFailureReason failureReason) {
+        Transaction transaction = new Transaction(fromAccount, toAccount, amount, idempotencyKey);
+        transaction.status = TransactionStatus.FAILED;
+        transaction.failureReason = failureReason;
+
+        return transaction;
+    }
 }

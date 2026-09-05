@@ -5,6 +5,7 @@ import com.lukanizharadze.minibanking.entity.Account;
 import com.lukanizharadze.minibanking.entity.Transaction;
 import com.lukanizharadze.minibanking.model.AccountStatus;
 import com.lukanizharadze.minibanking.model.Currency;
+import com.lukanizharadze.minibanking.model.TransactionFailureReason;
 import com.lukanizharadze.minibanking.model.TransactionStatus;
 import com.lukanizharadze.minibanking.repository.AccountRepository;
 import com.lukanizharadze.minibanking.repository.TransactionRepository;
@@ -118,7 +119,13 @@ class MiniBankingApiIntegrationTest {
 
         assertThat(balanceOf(sourceId)).isEqualByComparingTo("100.00");
         assertThat(balanceOf(destinationId)).isEqualByComparingTo("0.00");
-        assertThat(transactionRepository.findAll()).isEmpty();
+
+        List<Transaction> transactions = transactionRepository.findAll();
+        assertThat(transactions).hasSize(1);
+
+        Transaction rejected = transactions.getFirst();
+        assertThat(rejected.getStatus()).isEqualTo(TransactionStatus.FAILED);
+        assertThat(rejected.getFailureReason()).isEqualTo(TransactionFailureReason.INSUFFICIENT_FUNDS);
     }
 
     @Test

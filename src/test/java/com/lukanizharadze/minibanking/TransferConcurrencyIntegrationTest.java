@@ -98,8 +98,18 @@ class TransferConcurrencyIntegrationTest {
                 .isEqualByComparingTo("100.00");
 
         List<Transaction> transactions = transactionRepository.findAll();
-        assertThat(transactions).hasSize(1);
-        assertThat(transactions.getFirst().getStatus()).isEqualTo(TransactionStatus.SUCCESS);
+        assertThat(transactions).hasSize(2);
+
+        assertThat(transactions)
+                .filteredOn(transaction -> transaction.getStatus() == TransactionStatus.SUCCESS)
+                .singleElement()
+                .satisfies(success -> assertThat(success.getFailureReason()).isNull());
+
+        assertThat(transactions)
+                .filteredOn(transaction -> transaction.getStatus() == TransactionStatus.FAILED)
+                .singleElement()
+                .satisfies(failed -> assertThat(failed.getFailureReason())
+                        .isEqualTo(TransactionFailureReason.INSUFFICIENT_FUNDS));
     }
 
     private Callable<TransactionResponse> transferTask(CyclicBarrier startBarrier,
