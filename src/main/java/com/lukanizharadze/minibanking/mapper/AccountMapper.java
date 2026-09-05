@@ -1,4 +1,5 @@
 package com.lukanizharadze.minibanking.mapper;
+
 import com.lukanizharadze.minibanking.dto.AccountResponse;
 import com.lukanizharadze.minibanking.entity.Account;
 import org.springframework.stereotype.Component;
@@ -16,9 +17,5 @@ public class AccountMapper {
                 account.getStatus(),
                 account.getCreatedAt()
         );
-
-
     }
-
-
 }

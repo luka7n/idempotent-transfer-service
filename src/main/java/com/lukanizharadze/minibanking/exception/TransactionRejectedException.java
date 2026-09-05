@@ -1,7 +1,7 @@
 package com.lukanizharadze.minibanking.exception;
 
-import lombok.Getter;
 import com.lukanizharadze.minibanking.model.TransactionFailureReason;
+import lombok.Getter;
 
 @Getter
 public class TransactionRejectedException extends RuntimeException {
@@ -10,7 +10,6 @@ public class TransactionRejectedException extends RuntimeException {
 
     public TransactionRejectedException(TransactionFailureReason reason, String message) {
         super(message);
-
 
         this.reason = reason;
     }

@@ -1,11 +1,11 @@
 package com.lukanizharadze.minibanking.entity;
 
+import com.lukanizharadze.minibanking.model.TransactionFailureReason;
+import com.lukanizharadze.minibanking.model.TransactionStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
-import java.math.BigDecimal;
 
-import com.lukanizharadze.minibanking.model.TransactionStatus;
-import com.lukanizharadze.minibanking.model.TransactionFailureReason;
+import java.math.BigDecimal;
 import java.time.Instant;
 
 @Entity
@@ -54,9 +54,6 @@ public class Transaction {
 
     protected Transaction() {
     }
-
-
-
 
     public Transaction(Account fromAccount, Account toAccount, BigDecimal amount, String idempotencyKey) {
         this.fromAccount = fromAccount;

@@ -9,4 +9,3 @@ public enum ErrorCode {
     IDEMPOTENCY_KEY_CONFLICT,
     IDEMPOTENCY_KEY_REQUIRED
 }
-

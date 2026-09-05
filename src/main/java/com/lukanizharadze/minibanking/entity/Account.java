@@ -1,11 +1,12 @@
 package com.lukanizharadze.minibanking.entity;
+
 import com.lukanizharadze.minibanking.model.AccountStatus;
 import com.lukanizharadze.minibanking.model.Currency;
 import jakarta.persistence.*;
 import lombok.Getter;
+
 import java.math.BigDecimal;
 import java.time.Instant;
-
 
 @Entity
 @Getter
@@ -36,6 +37,7 @@ public class Account {
 
     protected Account() {
     }
+
     public Account(String ownerName, String accountNumber, BigDecimal initialBalance, Currency currency) {
         this.ownerName = ownerName;
         this.accountNumber = accountNumber;
@@ -53,14 +55,11 @@ public class Account {
         balance = balance.subtract(amount);
     }
 
-
     public void credit(BigDecimal amount) {
         balance = balance.add(amount);
     }
+
     public void close() {
         status = AccountStatus.CLOSED;
     }
-
-
-
 }

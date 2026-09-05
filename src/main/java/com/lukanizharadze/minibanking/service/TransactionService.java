@@ -2,33 +2,30 @@ package com.lukanizharadze.minibanking.service;
 
 import com.lukanizharadze.minibanking.dto.TopAccountResponse;
 import com.lukanizharadze.minibanking.dto.TransactionHistoryResponse;
-import org.springframework.stereotype.Service;
-import lombok.RequiredArgsConstructor;
-import com.lukanizharadze.minibanking.repository.AccountRepository;
-import com.lukanizharadze.minibanking.repository.TransactionRepository;
-
-import com.lukanizharadze.minibanking.mapper.TransactionMapper;
-import org.springframework.transaction.annotation.Transactional;
-import com.lukanizharadze.minibanking.dto.TransactionResponse;
 import com.lukanizharadze.minibanking.dto.TransactionRequest;
-import com.lukanizharadze.minibanking.exception.SameAccountTransactionException;
+import com.lukanizharadze.minibanking.dto.TransactionResponse;
 import com.lukanizharadze.minibanking.entity.Account;
 import com.lukanizharadze.minibanking.entity.Transaction;
 import com.lukanizharadze.minibanking.exception.AccountNotFoundException;
-import com.lukanizharadze.minibanking.model.AccountStatus;
+import com.lukanizharadze.minibanking.exception.IdempotencyException;
+import com.lukanizharadze.minibanking.exception.SameAccountTransactionException;
 import com.lukanizharadze.minibanking.exception.TransactionRejectedException;
+import com.lukanizharadze.minibanking.mapper.TransactionMapper;
+import com.lukanizharadze.minibanking.model.AccountStatus;
 import com.lukanizharadze.minibanking.model.TransactionFailureReason;
-
+import com.lukanizharadze.minibanking.repository.AccountRepository;
+import com.lukanizharadze.minibanking.repository.TransactionRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
-import org.springframework.dao.DataIntegrityViolationException;
-import com.lukanizharadze.minibanking.exception.IdempotencyException;
-import org.springframework.data.domain.PageRequest;
-
-
 
 @Service
 @RequiredArgsConstructor
@@ -40,7 +37,6 @@ public class TransactionService {
 
     private static final int MAX_PAGE_SIZE = 100;
     private static final int TOP_ACCOUNTS_LIMIT = 5;
-
 
     @Transactional
     public TransactionResponse transfer(TransactionRequest request, String idempotencyKey) {
@@ -54,7 +50,6 @@ public class TransactionService {
             );
         }
 
-
         if (request.fromAccountId().equals(request.toAccountId())) {
 
             throw new SameAccountTransactionException(request.fromAccountId());
@@ -63,13 +58,11 @@ public class TransactionService {
         Account sourceAccount = getAccount(request.fromAccountId());
         Account destinationAccount = getAccount(request.toAccountId());
 
-
         validateTransaction(
                 sourceAccount,
                 destinationAccount,
                 request.amount()
         );
-
 
         sourceAccount.debit(request.amount());
         destinationAccount.credit(request.amount());
@@ -81,9 +74,7 @@ public class TransactionService {
                 idempotencyKey
         );
 
-
         return transactionMapper.toResponse(transaction);
-
     }
 
     private void validateTransaction(Account sourceAccount,
@@ -95,8 +86,6 @@ public class TransactionService {
                     TransactionFailureReason.ACCOUNT_CLOSED,
                     "Transfer involves closed account"
             );
-
-
         }
 
         if (sourceAccount.getCurrency() != destinationAccount.getCurrency()) {
@@ -109,7 +98,7 @@ public class TransactionService {
         if (sourceAccount.getBalance().compareTo(amount) < 0) {
             throw new TransactionRejectedException(
                     TransactionFailureReason.INSUFFICIENT_FUNDS,
-                    "Account " + sourceAccount.getId() + " doesnot have enough funds"
+                    "Account " + sourceAccount.getId() + " does not have enough funds"
             );
         }
     }
@@ -160,7 +149,6 @@ public class TransactionService {
         int pageNumber = Math.max(page, 0);
         int pageSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
 
-
         Page<TransactionResponse> history = transactionRepository
                 .findHistory(
                         accountId,
@@ -169,8 +157,6 @@ public class TransactionService {
                         PageRequest.of(pageNumber, pageSize)
                 )
                 .map(transactionMapper::toResponse);
-
-
 
         return new TransactionHistoryResponse(
                 history.getContent(),
@@ -187,5 +173,4 @@ public class TransactionService {
                 PageRequest.of(0, TOP_ACCOUNTS_LIMIT)
         );
     }
-
 }

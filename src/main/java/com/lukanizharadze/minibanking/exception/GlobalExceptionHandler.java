@@ -1,21 +1,16 @@
 package com.lukanizharadze.minibanking.exception;
 
-
-
-import com.lukanizharadze.minibanking.dto.TransactionResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.web.bind.MissingRequestHeaderException;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
-
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
-
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice
@@ -29,8 +24,6 @@ public class GlobalExceptionHandler {
                 ex.getMessage()
         );
     }
-
-
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ProblemDetail handleValidation(MethodArgumentNotValidException ex) {
@@ -63,7 +56,6 @@ public class GlobalExceptionHandler {
                 ErrorCode.SAME_ACCOUNT_TRANSACTION,
                 ex.getMessage()
         );
-
     }
 
     @ExceptionHandler(TransactionRejectedException.class)
@@ -73,10 +65,7 @@ public class GlobalExceptionHandler {
                 ex.getReason().name(),
                 ex.getMessage()
         );
-
-
     }
-
 
     @ExceptionHandler(AccountNotEmptyException.class)
     public ProblemDetail handleAccountNotEmpty(AccountNotEmptyException ex) {
@@ -104,8 +93,8 @@ public class GlobalExceptionHandler {
                 ErrorCode.IDEMPOTENCY_KEY_REQUIRED,
                 "Idempotency-Key header is required"
         );
-
     }
+
     @ExceptionHandler(IdempotencyException.class)
     public ProblemDetail handleIdempotencyConflict(IdempotencyException ex) {
         return createProblem(
@@ -114,7 +103,4 @@ public class GlobalExceptionHandler {
                 ex.getMessage()
         );
     }
-
-
-
 }

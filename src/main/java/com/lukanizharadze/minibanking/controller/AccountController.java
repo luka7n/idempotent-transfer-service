@@ -1,14 +1,12 @@
 package com.lukanizharadze.minibanking.controller;
 
 import com.lukanizharadze.minibanking.dto.*;
-import com.lukanizharadze.minibanking.service.TransactionService;
-import org.springframework.web.bind.annotation.*;
-import lombok.RequiredArgsConstructor;
-
 import com.lukanizharadze.minibanking.service.AccountService;
-import org.springframework.http.HttpStatus;
-
+import com.lukanizharadze.minibanking.service.TransactionService;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.util.List;
@@ -27,8 +25,6 @@ public class AccountController {
         return accountService.openAccount(request);
     }
 
-
-
     @GetMapping
     public List<AccountResponse> findAccounts() {
         return accountService.findAccounts();
@@ -42,16 +38,14 @@ public class AccountController {
     @PatchMapping("/{accountId}")
     public AccountResponse updateOwnerName(@PathVariable Long accountId,
                                            @Valid @RequestBody UpdateAccountOwnerNameRequest request){
-        return  accountService.updateOwnerName(accountId, request);
+        return accountService.updateOwnerName(accountId, request);
     }
-
 
     @DeleteMapping("/{accountId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void closeAccount(@PathVariable Long accountId) {
         accountService.closeAccount(accountId);
     }
-
 
     @GetMapping("/{accountId}/transactions")
     public TransactionHistoryResponse findAccountTransactions(

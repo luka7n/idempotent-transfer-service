@@ -1,8 +1,9 @@
 package com.lukanizharadze.minibanking.dto;
 
-import java.math.BigDecimal;
-import com.lukanizharadze.minibanking.model.Currency;
 import com.lukanizharadze.minibanking.model.AccountStatus;
+import com.lukanizharadze.minibanking.model.Currency;
+
+import java.math.BigDecimal;
 import java.time.Instant;
 
 public record AccountResponse(

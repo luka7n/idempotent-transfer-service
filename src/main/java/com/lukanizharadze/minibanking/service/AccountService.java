@@ -1,22 +1,21 @@
 package com.lukanizharadze.minibanking.service;
 
-import org.springframework.stereotype.Service;
-import lombok.RequiredArgsConstructor;
-import com.lukanizharadze.minibanking.repository.AccountRepository;
-import com.lukanizharadze.minibanking.mapper.AccountMapper;
-import org.springframework.transaction.annotation.Transactional;
 import com.lukanizharadze.minibanking.dto.AccountResponse;
 import com.lukanizharadze.minibanking.dto.OpenAccountRequest;
-import com.lukanizharadze.minibanking.entity.Account;
-import java.util.List;
-
-import com.lukanizharadze.minibanking.model.AccountStatus;
-import com.lukanizharadze.minibanking.exception.AccountNotFoundException;
-
-import java.util.UUID;
 import com.lukanizharadze.minibanking.dto.UpdateAccountOwnerNameRequest;
-import java.math.BigDecimal;
+import com.lukanizharadze.minibanking.entity.Account;
 import com.lukanizharadze.minibanking.exception.AccountNotEmptyException;
+import com.lukanizharadze.minibanking.exception.AccountNotFoundException;
+import com.lukanizharadze.minibanking.mapper.AccountMapper;
+import com.lukanizharadze.minibanking.model.AccountStatus;
+import com.lukanizharadze.minibanking.repository.AccountRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -39,14 +38,11 @@ public class AccountService {
         return accountMapper.toResponse(account);
     }
 
-
-
     @Transactional(readOnly = true)
     public List<AccountResponse> findAccounts() {
         return accountRepository.findAll().stream()
                 .map(accountMapper::toResponse).toList();
     }
-
 
     @Transactional(readOnly = true)
     public AccountResponse findOneAccount(Long accountId) {
@@ -73,7 +69,6 @@ public class AccountService {
         }
         account.close();
     }
-
 
     private Account getAccount(Long accountId) {
         return accountRepository.findById(accountId)
