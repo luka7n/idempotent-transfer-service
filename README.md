@@ -1,239 +1,194 @@
 # Mini Banking API
 
-This is a small REST API for opening bank accounts and transferring money between them.
+[![build](https://github.com/luka7n/mini-banking-api/actions/workflows/build.yml/badge.svg)](https://github.com/luka7n/mini-banking-api/actions/workflows/build.yml)
 
-Stack - Java 21, Spring Boot, Spring Data JPA, Gradle and H2 database.
+A small REST API for managing bank accounts and transferring money between them. I built it with
+Java 21, Spring Boot, Spring Data JPA, H2 and Gradle.
 
+The project supports:
 
-## Questions
+- opening, reading, updating and closing accounts
+- atomic money transfers
+- protection against repeated transfer requests
+- safe transfers when two requests use the same account at the same time
+- successful and failed transaction records
+- transaction history with pagination and date filters
+- top five accounts by successful transaction count
+- Swagger UI and consistent error responses
 
-1. How did you design the API?
-
-I kept account operations under `/api/v1/accounts`, `POST` open an account, `GET` reads accounts, `PATCH` updates only the owner name and `DELETE` closes an account,  transfers use `/api/v1/transactions` and history is under `/accounts/{id}/transactions`. I used `201` for created resources, `204` for a successful close, `400` for invalid input, `404` for a missing account, `409` for a conflict and `422` when a valid transfer is rejected by a business rule.
-
-2. How did you guarantee that a transfer is atomic?
-
-I applied `@Transactional` to `TransactionService.transfer()`, I placed @Transactional on the service method because a transfer contains several database changes, and they must all succeed or fail together.
-
-3. What happened when an error occurred after the debit but before the credit?
-
-I tested this by temporarily flushing the source account immediately after debiting it and then throwing an exception before crediting the destination. Hibernate executed the balance update and the request returned `500`, but later GET requests showed the original balances of `1000.00` and `0.00`. Since the service method runs inside one `@Transactional` boundary, the exception rolled the database update back.
-
-4. How did you protect the system against repeated requests?
-
-Every transfer requires an `Idempotency-Key`, which is stored on a successful transaction and has a unique database constraint. Before changing any balance, the service checks the key and returns the stored transaction when the request parameters match, while using the same key with different parameters returns `409`. `saveAndFlush()` also makes the database detect a duplicate key before the transaction finishes, preventing a second debit.
-
-5. What could go wrong with two transfers on the same account?
-
-Two transfers could read the same balance before either one commits, so both could pass the balance check and cause a lost update or allow overspending. 
-Now we does not lock account rows and I listed this limitation in not finished block below. I would solve it by
-loading both accounts with a PESSIMISTIC_WRITE write lock in account repository but I did not have enough time to implement and test it.
-
-6. Why did you use this project structure?
-
-Controllers handle HTTP, DTOs define request and response data, services contain business rules and transaction boundaries, repositories access the database, entities represent stored data and mappers keep conversion code out of services. 
-This gives the small project enough separation.
-If it grew much larger, my first change would be to group code by feature and split TransactionService: 
-TransferService would handle balance changes and idempotency, while other some service would handle history and top-account queries. 
-I would also replace the in memory H2 create-drop setup with a persistent database and versioned Flyway migrations.
-
-7. What assumptions did you make?
-
-Deleting an account closes it instead of removing it, because its transaction history should remain and closed accounts are still visible, but cannot be used for new transfers.
-
-An account can be opened with a zero balance, but not a negative balance. There are no separate deposit or withdrawal operations.
-
-The supported currencies are GEL, USD and EUR. Currency cannot be changed and transfers between different currencies are rejected.
-
-Money can have up to two decimal places. Longer values are rejected instead of rounded.
-
-Database ids use generated Long values. Account numbers are created by the server with a GE prefix and a random part taken from a UUID.
-
-Every transfer requires an Idempotency-Key. 
-
-History includes both sent and received transactions and shows the newest first,pages start from zero and the maximum page size is 100.
-
-Top accounts are calculated using successful transactions, and both accounts involved in a transfer are counted.
-
-All errors use the same ProblemDetail format with an error code, so the client can understand what failed.
-
-
-## Not finished
-
-Failed transfer attempts return clear error responses, but they aren't saved as failed rows in the transactions table.
-
-Idempotency stores successful transfer results. A rejected request is not stored, and if two requests with the same key arrive at exactly the same time, one of them may return `409` instead of replaying the first response. 
-The database unique constraint still prevents a second successful debit.
-
-I checked the account, transfer, idempotency, history and rollback scenarios manually, but I did not finish automated integration tests.
-
-The optional Docker, daily limit and request/response logging features were not implemented because of time.
-
-
-
-
-## Build and run
+## Running the project
 
 Java 21 is required.
 
-```
+```bash
 ./gradlew build
 ./gradlew bootRun
 ```
 
 The API runs on `http://localhost:8081`.
 
-Swagger UI is available at `http://localhost:8081/swagger-ui.html`.
-
-The H2 console is available at `http://localhost:8081/h2-console`.
-
+- Swagger UI: `http://localhost:8081/swagger-ui.html`
+- H2 console: `http://localhost:8081/h2-console`
 - JDBC URL: `jdbc:h2:mem:minibanking`
 - User: `sa`
 - Password: empty
 
-The database is h2 and Hibernate uses `create-drop`, so all data is removed when the application stops.
+H2 is in memory and Hibernate uses `create-drop`, so the data is removed when the application
+stops.
 
-## Testing with Postman
+## API
 
-All endpoints start with `http://localhost:8081/api/v1`.
-
-For POST and PATCH requests I used Postman's Body > raw > JSON option. 
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/api/v1/accounts` | Open an account |
+| `GET` | `/api/v1/accounts` | List all accounts |
+| `GET` | `/api/v1/accounts/{accountId}` | Get one account |
+| `PATCH` | `/api/v1/accounts/{accountId}` | Update the owner name |
+| `DELETE` | `/api/v1/accounts/{accountId}` | Close an account |
+| `POST` | `/api/v1/transactions` | Transfer money |
+| `GET` | `/api/v1/accounts/{accountId}/transactions` | Get account history |
+| `GET` | `/api/v1/accounts/top` | Get the top five accounts |
 
 ### Open an account
 
-- Method: `POST`
-- URL: `http://localhost:8081/api/v1/accounts`
+```http
+POST /api/v1/accounts
+Content-Type: application/json
+```
 
-Body:
-
-json
-
+```json
 {
   "ownerName": "Luka Nizharadze",
   "initialBalance": 1000.00,
   "currency": "GEL"
 }
+```
 
-The response is `201 Created`. The account number is generated by the application. 
-
-I created a second account for transactions with the same request and this body:
-
-
-{
-  "ownerName": "Nika Beridze",
-  "initialBalance": 0.00,
-  "currency": "GEL"
-}
-
-
-The examples assume the second account has id 2.
-
-Supported currencies are `GEL`, `USD` and `EUR`. 
-Amounts with more than two decimal places are rejected.
-
-### List all accounts
-
-- Method: `GET`
-- URL: `http://localhost:8081/api/v1/accounts`
-
-The response contains active and closed accounts.
-
-### Get one account
-
-- Method: `GET`
-- URL: `http://localhost:8081/api/v1/accounts/1`
-
-A missing account returns 404 with the code `ACCOUNT_NOT_FOUND`.
-
-### Update the owner name
-
-- Method: `PATCH`
-- URL: `http://localhost:8081/api/v1/accounts/1`
-
-Body:
-
-json
-{
-  "ownerName": "Luka N"
-}
-
-Only the owner name can be changed by this operation. Balance and currency are not part of the request.
-
-### Close an account
-
-An account can be closed only when its balance is zero. 
-
-- Method: `DELETE`
-- URL: `http://localhost:8081/api/v1/accounts/3`
-
-The response is 204 no contet. The row is not deleted, its status becomes CLOSED. Repeating the same DELETE request also returns 204.
-
-Trying to close an account that still holds money returns 409 with the code "ACCOUNT_NOT_EMPTY".
+The response is `201 Created`. The account number is generated by the application.
 
 ### Transfer money
 
-- Method: `POST`
-- URL: `http://localhost:8081/api/v1/transactions`
-
-Header:
-
-
+```http
+POST /api/v1/transactions
+Content-Type: application/json
 Idempotency-Key: transfer-001
+```
 
-
-Body:
-
-json
+```json
 {
   "fromAccountId": 1,
   "toAccountId": 2,
   "amount": 200.00
 }
+```
 
+A successful request returns `201 Created`. Repeating this request with the same key returns the
+first transaction and does not move the money again.
 
-The response is `201 Created` with a `SUCCESS` transaction. The source balance becomes `800.00` and the destination balance becomes `200.00`.
+### Error responses
 
-To test idempotency I sent the same request again with the same key. The API returned the first transaction with the same id and the balances didnot change again.
+Errors use Spring `ProblemDetail` and include a `code` field.
 
-I also kept the key `transfer-001` and changed the amount to `500.00`. The API returned 409 with `IDEMPOTENCY_KEY_CONFLICT`. A request without the header returned 400 with `IDEMPOTENCY_KEY_REQUIRED`.
+| Status | Meaning |
+| --- | --- |
+| `400` | Invalid input, same-account transfer or missing idempotency key |
+| `404` | Account not found |
+| `409` | Account cannot be closed or an idempotency key was reused incorrectly |
+| `422` | Transfer rejected because of balance, currency or account status |
 
-### Account transaction history
+## Project decisions
 
-- Method: `GET`
-- URL: `http://localhost:8081/api/v1/accounts/1/transactions`
+### Why did I design the API this way?
 
-In Postman's Params tab I used:
+I kept account operations under `/api/v1/accounts` and transfers under
+`/api/v1/transactions`. I used `POST` for creation, `GET` for reading, `PATCH` for changing only the
+owner name and `DELETE` for closing an account. Created resources return `201`, a successful close
+returns `204`, and errors use `400`, `404`, `409` or `422` depending on the reason.
 
+### How is a transfer atomic?
 
-page = 0
-size = 20
+`TransferProcessor.process()` is marked with `@Transactional`. The account locks, validation,
+debit, credit and successful transaction insert are all part of the same database transaction. If
+one of those steps throws an exception, Spring rolls the whole transaction back.
 
+### What happens if something fails after the debit?
 
-The response contains incoming and outgoing transactions ordered from newest to oldest. It also returns the current page, page size, total number of transactions and total pages.
+I covered this with an integration test. The test forces an exception after Hibernate has flushed
+the balance updates and transaction insert, then checks the database again. Both balances keep
+their old values and no transaction row remains, which shows that `flush` sent the SQL but did not
+commit it.
 
-The date filter is optional. I tested it with these Params:
+### How are repeated requests handled?
 
+Every transfer needs an `Idempotency-Key` header and the key is stored in a unique database column.
+If the same key and request are sent again, the stored result is returned without changing the
+balances. Reusing the key with different account ids or a different amount returns `409`.
 
-from = 2026-08-01T00:00:00Z
-to = 2026-09-01T00:00:00Z
-page = 0
-size = 20
+Successful and failed results both keep their idempotency key. This means retrying a rejected
+transfer also returns the same rejection instead of creating another record.
 
+### How are concurrent transfers handled?
 
-`from` is included and `to` is excluded. The maximum page size is `100`. History for an account that does not exist returns `404 ACCOUNT_NOT_FOUND`.
+The account rows are loaded with a `PESSIMISTIC_WRITE` lock before their balances are checked. A
+second transfer using the same account waits for the first one to finish, then reads the latest
+balance. Both accounts are locked in id order to reduce the chance of a deadlock when transfers run
+in opposite directions.
 
-### Top five accounts
+I tested this with two transfers trying to spend `80` from a balance of `100` at the same time. One
+transfer succeeds, the other gets `INSUFFICIENT_FUNDS`, and the total balance stays unchanged.
 
-- Method: `GET`
-- URL: `http://localhost:8081/api/v1/accounts/top`
+### How are failed transfers stored?
 
-The response contains up to five accounts ordered by the number of successful transactions. A transaction is counted for both the sender and the receiver because both accounts took part in it.
+Closed accounts, different currencies and insufficient funds are stored as `FAILED` transaction
+rows. The main transfer transaction rolls back first, then `FailedTransactionRecorder` saves the
+failed row in a separate `REQUIRES_NEW` transaction. Invalid JSON, missing accounts and
+same-account requests are not stored because the transfer did not reach the business operation.
 
-## Error responses
+### Why did I use this structure?
 
-Errors use Spring `ProblemDetail` and include a `code` property so the client can distinguish the reason.
+Controllers handle HTTP requests, DTOs define request and response data, services contain business
+rules, repositories access the database and entities represent stored data. Mappers convert
+entities to response DTOs, so controllers do not return database entities directly.
 
-Invalid input, zero or negative amounts and same-account transfers return `400`.
-A missing account returns `404`.
-Closing an account that still has money and reusing an idempotency key with different parameters return `409`.
-Insufficient funds, closed accounts and currency mismatch return `422`.
+For this project the layered structure is small and easy to follow. If the project became much
+larger, I would group the code by feature and separate transfer commands from transaction queries.
+I would also replace H2 and `create-drop` with PostgreSQL and Flyway migrations.
+
+### Other assumptions
+
+- Closing an account changes its status to `CLOSED` instead of deleting the row, because its
+  transaction history must remain available.
+- An account can be opened with a zero balance but not a negative one.
+- An account can be closed only when its balance is zero. Closing it again still returns `204`.
+- Closed accounts remain visible but cannot send or receive money.
+- Supported currencies are `GEL`, `USD` and `EUR`. Cross-currency transfers are rejected because
+  exchange rates are outside this project.
+- Amounts can have up to two decimal places. Longer values are rejected instead of rounded.
+- Money uses `BigDecimal` because `double` cannot represent every decimal value exactly.
+- Database ids use generated `Long` values. Account numbers use a `GE` prefix and a random part
+  taken from a UUID.
+- History includes incoming, outgoing, successful and failed transactions. It is ordered from the
+  newest transaction to the oldest.
+- History pages start at zero, the maximum page size is 100, `from` is inclusive and `to` is
+  exclusive.
+- The top-accounts query counts successful transactions for both the sender and receiver.
+
+## Tests
+
+```bash
+./gradlew test
+```
+
+There are 14 tests using the Spring application context and H2. They cover account creation,
+successful and rejected transfers, idempotency, failed transaction records, concurrent transfers
+and rollback after the SQL has been flushed.
+
+GitHub Actions also runs `./gradlew build` after every push and pull request.
+
+## Current limitations
+
+- H2 stores data only while the application is running.
+- Authentication and authorization are not included.
+- If two requests with the same new idempotency key arrive at exactly the same time, the database
+  prevents a second transfer but one request may receive `409` instead of replaying the other one.
+- The locking tests currently run on H2. They should be run again when changing to PostgreSQL.
