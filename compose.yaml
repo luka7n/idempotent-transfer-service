@@ -1,0 +1,11 @@
+name: idempotent-transfer-service
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: transfers
+      POSTGRES_USER: transfers
+      POSTGRES_PASSWORD: transfers
+    ports:
+      - "5432"
