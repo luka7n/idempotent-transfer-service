@@ -21,8 +21,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
         from Transaction tx
         where (tx.fromAccount.id = :accountId
                or tx.toAccount.id = :accountId)
-          and (:fromDate is null or tx.createdAt >= :fromDate)
-          and (:toDate is null or tx.createdAt < :toDate)
+          and (cast(:fromDate as Instant) is null or tx.createdAt >= :fromDate)
+          and (cast(:toDate as Instant) is null or tx.createdAt < :toDate)
         order by tx.createdAt desc, tx.id desc
         """)
     Page<Transaction> findHistory(
