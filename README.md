@@ -1,40 +1,158 @@
-# Mini Banking API
+# Idempotent Transfer Service
 
-[![build](https://github.com/luka7n/mini-banking-api/actions/workflows/build.yml/badge.svg)](https://github.com/luka7n/mini-banking-api/actions/workflows/build.yml)
+[![build](https://github.com/luka7n/idempotent-transfer-service/actions/workflows/build.yml/badge.svg)](https://github.com/luka7n/idempotent-transfer-service/actions/workflows/build.yml)
 
-A small REST API for managing bank accounts and transferring money between them. I built it with
-Java 21, Spring Boot, Spring Data JPA, H2 and Gradle.
+A Spring Boot service that moves money between accounts and stays correct when clients retry
+requests or send them at the same time. I built it with Java 21, Spring Boot 4, Spring Data JPA,
+PostgreSQL, Flyway and Gradle. The tests run against a real PostgreSQL database with
+Testcontainers, because locking behaviour on an in-memory database does not prove much.
 
 The project supports:
 
-- opening, reading, updating and closing accounts
+- opening, reading, renaming and closing accounts
 - atomic money transfers
-- protection against repeated transfer requests
-- safe transfers when two requests use the same account at the same time
+- idempotent retries with an `Idempotency-Key` header
 - successful and failed transaction records
 - transaction history with pagination and date filters
 - top five accounts by successful transaction count
 - Swagger UI and consistent error responses
 
+## Failure modes
+
+Each row is covered by an integration test that runs on PostgreSQL.
+
+| What happens | Result | Test |
+| --- | --- | --- |
+| The client times out and retries after the first request already committed | The stored transaction is returned and no money moves again | [`repeatedIdempotencyKeyReturnsFirstTransactionAndDebitsOnce`][api-test] |
+| 20 retries with the same key arrive at the same time | Money moves once and all 20 get the same transaction | [`concurrentRetriesWithTheSameKeyMoveMoneyOnceAndReturnTheSameTransaction`][concurrency-test] |
+| 20 retries of a transfer that will be rejected arrive at the same time | One `FAILED` row is stored and all 20 get the same `422` | [`concurrentRetriesOfARejectedTransferAllReturnTheSameRejection`][concurrency-test] |
+| A key is reused with a different amount or different accounts | `409 IDEMPOTENCY_KEY_CONFLICT`, nothing changes | [`reusedIdempotencyKeyWithDifferentAmountIsRejected`][api-test] |
+| Two transfers try to spend the same balance at the same time | One succeeds, the other gets `INSUFFICIENT_FUNDS` | [`concurrentTransfersFromTheSameAccountCannotOverdrawIt`][concurrency-test] |
+| 200 random transfers run on 20 threads, many in opposite directions | No deadlocks, and every balance equals its starting balance plus its successful transactions | [`randomConcurrentTransfersKeepEveryBalanceEqualToItsTransactions`][concurrency-test] |
+| An account is renamed while a transfer uses it | The transfer waits for the rename, and its balance change is kept | [`renamingAnAccountDuringATransferDoesNotUndoTheTransfer`][concurrency-test] |
+| An account is closed while a transfer into it is waiting | The transfer is rejected with `ACCOUNT_CLOSED` and no money is lost | [`closingAnAccountDuringATransferIntoItRejectsTheTransfer`][concurrency-test] |
+| An exception happens after the debit, credit and insert were flushed | The whole transfer rolls back and no row remains | [`unexpectedFailureAfterFlushRollsBackTheWholeTransfer`][rollback-test] |
+| A rejected transfer is retried | The same rejection is returned without storing another row | [`replayingFailedTransferReturnsSameRejectionWithoutStoringAnotherRow`][failed-test] |
+
+[api-test]: src/test/java/com/lukanizharadze/transferservice/TransferServiceIntegrationTest.java
+[concurrency-test]: src/test/java/com/lukanizharadze/transferservice/TransferConcurrencyIntegrationTest.java
+[rollback-test]: src/test/java/com/lukanizharadze/transferservice/TransferRollbackIntegrationTest.java
+[failed-test]: src/test/java/com/lukanizharadze/transferservice/FailedTransferIntegrationTest.java
+
+## How a transfer runs
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Service as TransactionService
+    participant Processor as TransferProcessor
+    participant DB as PostgreSQL
+
+    Client->>Service: POST /api/v1/transactions with Idempotency-Key
+    Service->>DB: find transaction by key
+    alt key is already stored
+        Service-->>Client: the stored result
+    else new key
+        Service->>Processor: process in one database transaction
+        Processor->>DB: lock both accounts in id order
+        Processor->>Processor: check status, currency and balance
+        Processor->>DB: debit, credit, insert SUCCESS row
+        alt another request stored the same key first
+            DB-->>Processor: unique violation, roll back
+            Service->>DB: read the stored transaction
+            Service-->>Client: its result, or 409 if the request is different
+        else a business rule rejects the transfer
+            Processor-->>Service: roll back
+            Service->>DB: insert FAILED row in a new transaction
+            Service-->>Client: 422 with the reason
+        else
+            DB-->>Processor: commit
+            Service-->>Client: 201 Created
+        end
+    end
+```
+
+## Design decisions
+
+### Why checking the key first is not enough
+
+The service looks up the idempotency key before doing any work, but that check cannot see a
+request with the same key that is still running. Two retries can both pass it. The real guard is
+the unique constraint on `idempotency_key`: only one insert can win. When the losing request hits
+the constraint, its transaction rolls back, it reads the row the winner stored and returns the same
+result. A retry that differs from the stored request still gets `409`.
+
+### Why pessimistic locking
+
+Transfers that touch the same account are expected to collide, so I lock the account rows with
+`SELECT ... FOR NO KEY UPDATE` before reading balances. A second transfer on the same account waits
+and then sees the latest balance. With optimistic locking the losing request would fail and the
+client would have to retry it, which makes the API harder to use for the common case.
+
+The cost is that all transfers on one account run one at a time. That is fine here, but a very
+busy account would become a bottleneck.
+
+Both accounts are locked in id order, so `A -> B` and `B -> A` cannot each hold one row while
+waiting for the other. I checked that the random transfer test fails with PostgreSQL's
+`deadlock detected` error when this ordering is removed.
+
+### Renaming and closing take the same lock
+
+Hibernate writes every column when it updates an account, including the balance. Without a lock, a
+rename that read the account before a transfer committed would write the old balance back. Closing
+has a similar problem because it checks that the balance is zero. Both operations lock the row the
+same way a transfer does, and two tests reproduce the race.
+
+### How failed transfers are stored
+
+Closed accounts, different currencies and insufficient funds are stored as `FAILED` rows. The
+transfer transaction rolls back first, then `FailedTransactionRecorder` saves the row in a separate
+`REQUIRES_NEW` transaction. `TransactionService.transfer()` is not transactional on purpose: by the
+time the recorder runs, the account locks are already released. Invalid JSON, missing accounts and
+same-account requests are not stored because they never reach the business operation.
+
+### Schema and constraints
+
+Flyway owns the schema and Hibernate only validates it on startup. The database also enforces the
+rules that must never break, even if the code has a bug: balances cannot be negative, amounts must
+be positive, a transfer cannot use the same account twice, and a failure reason exists only on
+failed transactions.
+
+### Structure
+
+Controllers handle HTTP, DTOs define request and response data, services contain the business
+rules, repositories access the database and entities represent stored data. Mappers convert
+entities to response DTOs, so controllers never return entities. For a project of this size a
+layered structure is easy to follow. If it grew, I would group the code by feature.
+
+## What I would change in production
+
+- Scope idempotency keys per client and expire them after a fixed time. Today a key is global and
+  stored forever.
+- Store a hash of the request with the key instead of comparing individual fields.
+- Add authentication and authorization.
+- Set a lock timeout so a stuck transaction fails fast instead of holding request threads.
+- For very busy accounts, move to an append-only ledger and derive balances from it instead of
+  updating one balance row.
+- If other services had to react to transfers, write the events to an outbox table in the same
+  transaction instead of publishing them after commit.
+- Add metrics for rejections by reason, replayed requests and lock wait time.
+- Paginate `GET /api/v1/accounts`, which currently returns every account.
+
 ## Running the project
 
-Java 21 is required.
+Java 21 and Docker are required.
 
 ```bash
-./gradlew build
 ./gradlew bootRun
 ```
+
+Spring Boot starts PostgreSQL from `compose.yaml` and Flyway creates the schema. The data stays in
+the container between restarts, and `docker compose down` removes it.
 
 The API runs on `http://localhost:8081`.
 
 - Swagger UI: `http://localhost:8081/swagger-ui.html`
-- H2 console: `http://localhost:8081/h2-console`
-- JDBC URL: `jdbc:h2:mem:minibanking`
-- User: `sa`
-- Password: empty
-
-H2 is in memory and Hibernate uses `create-drop`, so the data is removed when the application
-stops.
 
 ## API
 
@@ -93,66 +211,8 @@ Errors use Spring `ProblemDetail` and include a `code` field.
 | --- | --- |
 | `400` | Invalid input, same-account transfer or missing idempotency key |
 | `404` | Account not found |
-| `409` | Account cannot be closed or an idempotency key was reused incorrectly |
+| `409` | Account cannot be closed or an idempotency key was reused with a different request |
 | `422` | Transfer rejected because of balance, currency or account status |
-
-## Project decisions
-
-### Why did I design the API this way?
-
-I kept account operations under `/api/v1/accounts` and transfers under
-`/api/v1/transactions`. I used `POST` for creation, `GET` for reading, `PATCH` for changing only the
-owner name and `DELETE` for closing an account. Created resources return `201`, a successful close
-returns `204`, and errors use `400`, `404`, `409` or `422` depending on the reason.
-
-### How is a transfer atomic?
-
-`TransferProcessor.process()` is marked with `@Transactional`. The account locks, validation,
-debit, credit and successful transaction insert are all part of the same database transaction. If
-one of those steps throws an exception, Spring rolls the whole transaction back.
-
-### What happens if something fails after the debit?
-
-I covered this with an integration test. The test forces an exception after Hibernate has flushed
-the balance updates and transaction insert, then checks the database again. Both balances keep
-their old values and no transaction row remains, which shows that `flush` sent the SQL but did not
-commit it.
-
-### How are repeated requests handled?
-
-Every transfer needs an `Idempotency-Key` header and the key is stored in a unique database column.
-If the same key and request are sent again, the stored result is returned without changing the
-balances. Reusing the key with different account ids or a different amount returns `409`.
-
-Successful and failed results both keep their idempotency key. This means retrying a rejected
-transfer also returns the same rejection instead of creating another record.
-
-### How are concurrent transfers handled?
-
-The account rows are loaded with a `PESSIMISTIC_WRITE` lock before their balances are checked. A
-second transfer using the same account waits for the first one to finish, then reads the latest
-balance. Both accounts are locked in id order to reduce the chance of a deadlock when transfers run
-in opposite directions.
-
-I tested this with two transfers trying to spend `80` from a balance of `100` at the same time. One
-transfer succeeds, the other gets `INSUFFICIENT_FUNDS`, and the total balance stays unchanged.
-
-### How are failed transfers stored?
-
-Closed accounts, different currencies and insufficient funds are stored as `FAILED` transaction
-rows. The main transfer transaction rolls back first, then `FailedTransactionRecorder` saves the
-failed row in a separate `REQUIRES_NEW` transaction. Invalid JSON, missing accounts and
-same-account requests are not stored because the transfer did not reach the business operation.
-
-### Why did I use this structure?
-
-Controllers handle HTTP requests, DTOs define request and response data, services contain business
-rules, repositories access the database and entities represent stored data. Mappers convert
-entities to response DTOs, so controllers do not return database entities directly.
-
-For this project the layered structure is small and easy to follow. If the project became much
-larger, I would group the code by feature and separate transfer commands from transaction queries.
-I would also replace H2 and `create-drop` with PostgreSQL and Flyway migrations.
 
 ### Other assumptions
 
@@ -165,13 +225,10 @@ I would also replace H2 and `create-drop` with PostgreSQL and Flyway migrations.
   exchange rates are outside this project.
 - Amounts can have up to two decimal places. Longer values are rejected instead of rounded.
 - Money uses `BigDecimal` because `double` cannot represent every decimal value exactly.
-- Database ids use generated `Long` values. Account numbers use a `GE` prefix and a random part
-  taken from a UUID.
-- History includes incoming, outgoing, successful and failed transactions. It is ordered from the
-  newest transaction to the oldest.
-- History pages start at zero, the maximum page size is 100, `from` is inclusive and `to` is
-  exclusive.
-- The top-accounts query counts successful transactions for both the sender and receiver.
+- Account numbers use a `GE` prefix and a random part taken from a UUID.
+- History includes incoming, outgoing, successful and failed transactions, newest first. Pages
+  start at zero, the maximum page size is 100, `from` is inclusive and `to` is exclusive.
+- The top-accounts query counts successful transactions for both the sender and the receiver.
 
 ## Tests
 
@@ -179,16 +236,6 @@ I would also replace H2 and `create-drop` with PostgreSQL and Flyway migrations.
 ./gradlew test
 ```
 
-There are 14 tests using the Spring application context and H2. They cover account creation,
-successful and rejected transfers, idempotency, failed transaction records, concurrent transfers
-and rollback after the SQL has been flushed.
-
-GitHub Actions also runs `./gradlew build` after every push and pull request.
-
-## Current limitations
-
-- H2 stores data only while the application is running.
-- Authentication and authorization are not included.
-- If two requests with the same new idempotency key arrive at exactly the same time, the database
-  prevents a second transfer but one request may receive `409` instead of replaying the other one.
-- The locking tests currently run on H2. They should be run again when changing to PostgreSQL.
+Docker must be running. There are 22 integration tests. Testcontainers starts PostgreSQL 17, Flyway
+applies the migration and the tests run through the real Spring context. GitHub Actions runs
+`./gradlew build` after every push and pull request.
