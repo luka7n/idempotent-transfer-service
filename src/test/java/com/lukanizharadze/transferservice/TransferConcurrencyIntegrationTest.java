@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
@@ -46,6 +47,7 @@ class TransferConcurrencyIntegrationTest {
     private static final BigDecimal TRANSFER_AMOUNT = new BigDecimal("80.00");
     private static final int TIMEOUT_SECONDS = 10;
     private static final int THREAD_COUNT = 20;
+    private static final int RANDOM_TRANSFER_COUNT = 200;
     private static final long LOCK_WAIT_MILLIS = 1000;
 
     @Autowired
@@ -212,6 +214,66 @@ class TransferConcurrencyIntegrationTest {
                         assertThat(rejected.getReason()).isEqualTo(TransactionFailureReason.ACCOUNT_CLOSED));
         assertThat(balanceOf(sourceId)).isEqualByComparingTo("100.00");
         assertThat(balanceOf(destinationId)).isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    void randomConcurrentTransfersKeepEveryBalanceEqualToItsTransactions() throws Exception {
+        List<Long> accountIds = new ArrayList<>();
+        for (int i = 1; i <= 4; i++) {
+            accountIds.add(createAccount("Owner " + i, "100.00", "TEST-RANDOM-" + i));
+        }
+
+        // A fixed seed keeps the requests reproducible; only the thread interleaving changes.
+        Random random = new Random(42);
+        List<Callable<TransactionResponse>> transfers = new ArrayList<>();
+        for (int i = 0; i < RANDOM_TRANSFER_COUNT; i++) {
+            int fromIndex = random.nextInt(accountIds.size());
+            int toIndex = (fromIndex + 1 + random.nextInt(accountIds.size() - 1)) % accountIds.size();
+            BigDecimal amount = BigDecimal.valueOf(random.nextInt(1, 5000), 2);
+
+            transfers.add(transferTask(accountIds.get(fromIndex), accountIds.get(toIndex), amount, "random-" + i));
+        }
+
+        int successCount = 0;
+        for (Future<TransactionResponse> transfer : executor.invokeAll(transfers)) {
+            try {
+                transfer.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                successCount++;
+            } catch (ExecutionException ex) {
+                assertThat(ex.getCause())
+                        .isInstanceOfSatisfying(TransactionRejectedException.class, rejected ->
+                                assertThat(rejected.getReason())
+                                        .isEqualTo(TransactionFailureReason.INSUFFICIENT_FUNDS));
+            }
+        }
+
+        List<Transaction> transactions = transactionRepository.findAll();
+        assertThat(transactions).hasSize(RANDOM_TRANSFER_COUNT);
+        assertThat(transactions)
+                .filteredOn(transaction -> transaction.getStatus() == TransactionStatus.SUCCESS)
+                .hasSize(successCount);
+
+        BigDecimal totalBalance = BigDecimal.ZERO;
+        for (Long accountId : accountIds) {
+            BigDecimal expectedBalance = new BigDecimal("100.00");
+            for (Transaction transaction : transactions) {
+                if (transaction.getStatus() != TransactionStatus.SUCCESS) {
+                    continue;
+                }
+                if (transaction.getFromAccount().getId().equals(accountId)) {
+                    expectedBalance = expectedBalance.subtract(transaction.getAmount());
+                }
+                if (transaction.getToAccount().getId().equals(accountId)) {
+                    expectedBalance = expectedBalance.add(transaction.getAmount());
+                }
+            }
+
+            BigDecimal balance = balanceOf(accountId);
+            assertThat(balance).isEqualByComparingTo(expectedBalance);
+            assertThat(balance).isGreaterThanOrEqualTo(BigDecimal.ZERO);
+            totalBalance = totalBalance.add(balance);
+        }
+        assertThat(totalBalance).isEqualByComparingTo("400.00");
     }
 
     private <T> List<Future<T>> startTogether(List<Callable<T>> tasks) {
