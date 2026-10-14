@@ -51,14 +51,14 @@ public class AccountService {
 
     @Transactional
     public AccountResponse updateOwnerName(Long accountId, UpdateAccountOwnerNameRequest request) {
-        Account account = getAccount(accountId);
+        Account account = lockAccount(accountId);
         account.updateOwnerName(request.ownerName());
         return accountMapper.toResponse(account);
     }
 
     @Transactional
     public void closeAccount(Long accountId) {
-        Account account = getAccount(accountId);
+        Account account = lockAccount(accountId);
 
         if (account.getStatus() == AccountStatus.CLOSED) {
             return;
@@ -72,6 +72,14 @@ public class AccountService {
 
     private Account getAccount(Long accountId) {
         return accountRepository.findById(accountId)
+                .orElseThrow(() -> new AccountNotFoundException(accountId));
+    }
+
+    // Hibernate writes every column when it updates an account. Without the same lock a transfer
+    // takes, a transfer committed in between would have its balance overwritten by a stale one,
+    // and closing could check a balance that is no longer current.
+    private Account lockAccount(Long accountId) {
+        return accountRepository.findByIdForUpdate(accountId)
                 .orElseThrow(() -> new AccountNotFoundException(accountId));
     }
 

@@ -2,6 +2,7 @@ package com.lukanizharadze.transferservice;
 
 import com.lukanizharadze.transferservice.dto.TransactionRequest;
 import com.lukanizharadze.transferservice.dto.TransactionResponse;
+import com.lukanizharadze.transferservice.dto.UpdateAccountOwnerNameRequest;
 import com.lukanizharadze.transferservice.entity.Account;
 import com.lukanizharadze.transferservice.entity.Transaction;
 import com.lukanizharadze.transferservice.exception.TransactionRejectedException;
@@ -10,12 +11,15 @@ import com.lukanizharadze.transferservice.model.TransactionFailureReason;
 import com.lukanizharadze.transferservice.model.TransactionStatus;
 import com.lukanizharadze.transferservice.repository.AccountRepository;
 import com.lukanizharadze.transferservice.repository.TransactionRepository;
+import com.lukanizharadze.transferservice.service.AccountService;
 import com.lukanizharadze.transferservice.service.TransactionService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -27,8 +31,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -36,9 +42,14 @@ class TransferConcurrencyIntegrationTest {
 
     private static final BigDecimal TRANSFER_AMOUNT = new BigDecimal("80.00");
     private static final int TIMEOUT_SECONDS = 10;
+    private static final int THREAD_COUNT = 20;
+    private static final long LOCK_WAIT_MILLIS = 1000;
 
     @Autowired
     private TransactionService transactionService;
+
+    @Autowired
+    private AccountService accountService;
 
     @Autowired
     private AccountRepository accountRepository;
@@ -46,10 +57,21 @@ class TransferConcurrencyIntegrationTest {
     @Autowired
     private TransactionRepository transactionRepository;
 
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+
+    private ExecutorService executor;
+
     @BeforeEach
     void clearDatabase() {
         transactionRepository.deleteAll();
         accountRepository.deleteAll();
+        executor = Executors.newFixedThreadPool(THREAD_COUNT);
+    }
+
+    @AfterEach
+    void stopThreads() {
+        executor.shutdownNow();
     }
 
     @Test
@@ -58,27 +80,19 @@ class TransferConcurrencyIntegrationTest {
         Long firstDestinationId = createAccount("First Destination", "0.00", "TEST-DESTINATION-1");
         Long secondDestinationId = createAccount("Second Destination", "0.00", "TEST-DESTINATION-2");
 
-        CyclicBarrier startBarrier = new CyclicBarrier(2);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
+        List<Future<TransactionResponse>> transfers = startTogether(List.of(
+                transferTask(sourceId, firstDestinationId, TRANSFER_AMOUNT, "concurrent-first"),
+                transferTask(sourceId, secondDestinationId, TRANSFER_AMOUNT, "concurrent-second")));
 
         int successCount = 0;
         List<Throwable> failures = new ArrayList<>();
-        try {
-            Future<TransactionResponse> firstTransfer = executor.submit(
-                    transferTask(startBarrier, sourceId, firstDestinationId, "concurrent-first"));
-            Future<TransactionResponse> secondTransfer = executor.submit(
-                    transferTask(startBarrier, sourceId, secondDestinationId, "concurrent-second"));
-
-            for (Future<TransactionResponse> transfer : List.of(firstTransfer, secondTransfer)) {
-                try {
-                    transfer.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                    successCount++;
-                } catch (ExecutionException ex) {
-                    failures.add(ex.getCause());
-                }
+        for (Future<TransactionResponse> transfer : transfers) {
+            try {
+                transfer.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                successCount++;
+            } catch (ExecutionException ex) {
+                failures.add(ex.getCause());
             }
-        } finally {
-            executor.shutdownNow();
         }
 
         assertThat(successCount).isEqualTo(1);
@@ -114,15 +128,74 @@ class TransferConcurrencyIntegrationTest {
                         .isEqualTo(TransactionFailureReason.INSUFFICIENT_FUNDS));
     }
 
-    private Callable<TransactionResponse> transferTask(CyclicBarrier startBarrier,
-                                                       Long sourceId,
+    @Test
+    void renamingAnAccountDuringATransferDoesNotUndoTheTransfer() throws Exception {
+        Long sourceId = createAccount("Source Owner", "100.00", "TEST-SOURCE");
+        Long destinationId = createAccount("Destination Owner", "0.00", "TEST-DESTINATION");
+
+        Future<TransactionResponse> transfer = transactionTemplate.execute(status -> {
+            accountService.updateOwnerName(sourceId, new UpdateAccountOwnerNameRequest("Renamed Owner"));
+            Future<TransactionResponse> concurrentTransfer = executor.submit(
+                    transferTask(sourceId, destinationId, TRANSFER_AMOUNT, "rename-race"));
+            awaitBeforeCommit(concurrentTransfer);
+            return concurrentTransfer;
+        });
+
+        assertThat(transfer.get(TIMEOUT_SECONDS, TimeUnit.SECONDS).status()).isEqualTo(TransactionStatus.SUCCESS);
+        assertThat(balanceOf(sourceId)).isEqualByComparingTo("20.00");
+        assertThat(balanceOf(destinationId)).isEqualByComparingTo("80.00");
+        assertThat(accountRepository.findById(sourceId).orElseThrow().getOwnerName()).isEqualTo("Renamed Owner");
+    }
+
+    @Test
+    void closingAnAccountDuringATransferIntoItRejectsTheTransfer() throws Exception {
+        Long sourceId = createAccount("Source Owner", "100.00", "TEST-SOURCE");
+        Long destinationId = createAccount("Destination Owner", "0.00", "TEST-DESTINATION");
+
+        Future<TransactionResponse> transfer = transactionTemplate.execute(status -> {
+            accountService.closeAccount(destinationId);
+            Future<TransactionResponse> concurrentTransfer = executor.submit(
+                    transferTask(sourceId, destinationId, TRANSFER_AMOUNT, "close-race"));
+            awaitBeforeCommit(concurrentTransfer);
+            return concurrentTransfer;
+        });
+
+        assertThatThrownBy(() -> transfer.get(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+                .cause()
+                .isInstanceOfSatisfying(TransactionRejectedException.class, rejected ->
+                        assertThat(rejected.getReason()).isEqualTo(TransactionFailureReason.ACCOUNT_CLOSED));
+        assertThat(balanceOf(sourceId)).isEqualByComparingTo("100.00");
+        assertThat(balanceOf(destinationId)).isEqualByComparingTo("0.00");
+    }
+
+    private <T> List<Future<T>> startTogether(List<Callable<T>> tasks) {
+        CyclicBarrier startBarrier = new CyclicBarrier(tasks.size());
+        return tasks.stream()
+                .map(task -> executor.submit(() -> {
+                    startBarrier.await(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                    return task.call();
+                }))
+                .toList();
+    }
+
+    // Gives the transfer time to commit if nothing blocks it. Without a row lock it finishes
+    // before the surrounding transaction commits, which is the interleaving these tests check.
+    private void awaitBeforeCommit(Future<TransactionResponse> transfer) {
+        try {
+            transfer.get(LOCK_WAIT_MILLIS, TimeUnit.MILLISECONDS);
+        } catch (ExecutionException | TimeoutException ignored) {
+            // The outcome is checked after the surrounding transaction commits.
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private Callable<TransactionResponse> transferTask(Long sourceId,
                                                        Long destinationId,
+                                                       BigDecimal amount,
                                                        String idempotencyKey) {
-        return () -> {
-            startBarrier.await(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            return transactionService.transfer(
-                    new TransactionRequest(sourceId, destinationId, TRANSFER_AMOUNT), idempotencyKey);
-        };
+        return () -> transactionService.transfer(
+                new TransactionRequest(sourceId, destinationId, amount), idempotencyKey);
     }
 
     private Long createAccount(String ownerName, String balance, String accountNumber) {
