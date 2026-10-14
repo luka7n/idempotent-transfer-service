@@ -1,0 +1,71 @@
+package com.lukanizharadze.transferservice.controller;
+
+import com.lukanizharadze.transferservice.dto.*;
+import com.lukanizharadze.transferservice.service.AccountService;
+import com.lukanizharadze.transferservice.service.TransactionService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.Instant;
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/v1/accounts")
+@RequiredArgsConstructor
+public class AccountController {
+
+    private final AccountService accountService;
+    private final TransactionService transactionService;
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public AccountResponse openAccount(@Valid @RequestBody OpenAccountRequest request) {
+        return accountService.openAccount(request);
+    }
+
+    @GetMapping
+    public List<AccountResponse> findAccounts() {
+        return accountService.findAccounts();
+    }
+
+    @GetMapping("/{accountId}")
+    public AccountResponse findAccount(@PathVariable Long accountId) {
+        return accountService.findOneAccount(accountId);
+    }
+
+    @PatchMapping("/{accountId}")
+    public AccountResponse updateOwnerName(@PathVariable Long accountId,
+                                           @Valid @RequestBody UpdateAccountOwnerNameRequest request){
+        return accountService.updateOwnerName(accountId, request);
+    }
+
+    @DeleteMapping("/{accountId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void closeAccount(@PathVariable Long accountId) {
+        accountService.closeAccount(accountId);
+    }
+
+    @GetMapping("/{accountId}/transactions")
+    public TransactionHistoryResponse findAccountTransactions(
+            @PathVariable Long accountId,
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        return transactionService.findAccountHistory(
+                accountId,
+                from,
+                to,
+                page,
+                size
+        );
+    }
+
+    @GetMapping("/top")
+    public List<TopAccountResponse> findTopAccounts() {
+        return transactionService.findTopAccounts();
+    }
+}
