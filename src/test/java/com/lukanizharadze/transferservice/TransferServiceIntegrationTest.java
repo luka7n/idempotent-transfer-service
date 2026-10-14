@@ -23,6 +23,8 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -85,6 +87,33 @@ class TransferServiceIntegrationTest {
         assertThat(persisted.getCurrency()).isEqualTo(Currency.GEL);
         assertThat(persisted.getStatus()).isEqualTo(AccountStatus.ACTIVE);
         assertThat(persisted.getAccountNumber()).isNotBlank();
+    }
+
+    @Test
+    void accountsAreListedInIdOrderAfterOneIsUpdated() throws Exception {
+        Long firstId = openAccount("First Owner", "100.00");
+        Long secondId = openAccount("Second Owner", "100.00");
+        Long thirdId = openAccount("Third Owner", "100.00");
+
+        // PostgreSQL stores an updated row in a new place, so without an explicit order it comes back last.
+        mockMvc.perform(patch("/api/v1/accounts/{accountId}", firstId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "ownerName": "Renamed Owner"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        String accounts = mockMvc.perform(get("/api/v1/accounts"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(JsonPath.<List<Number>>read(accounts, "$[*].id"))
+                .extracting(Number::longValue)
+                .containsExactly(firstId, secondId, thirdId);
     }
 
     @Test
