@@ -1,0 +1,51 @@
+package com.lukanizharadze.transferservice.repository;
+
+import com.lukanizharadze.transferservice.dto.TopAccountResponse;
+import com.lukanizharadze.transferservice.entity.Transaction;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+
+public interface TransactionRepository extends JpaRepository<Transaction, Long> {
+
+    Optional<Transaction> findByIdempotencyKey(String idempotencyKey);
+
+    @Query("""
+        select tx
+        from Transaction tx
+        where (tx.fromAccount.id = :accountId
+               or tx.toAccount.id = :accountId)
+          and (cast(:fromDate as Instant) is null or tx.createdAt >= :fromDate)
+          and (cast(:toDate as Instant) is null or tx.createdAt < :toDate)
+        order by tx.createdAt desc, tx.id desc
+        """)
+    Page<Transaction> findHistory(
+            @Param("accountId") Long accountId,
+            @Param("fromDate") Instant fromDate,
+            @Param("toDate") Instant toDate,
+            Pageable pageable
+    );
+
+    @Query("""
+        select new com.lukanizharadze.transferservice.dto.TopAccountResponse(
+                account.id,
+                account.accountNumber,
+                account.ownerName,
+                count(tx.id)
+        )
+        from Account account
+        join Transaction tx
+          on tx.fromAccount = account or tx.toAccount = account
+        where tx.status = com.lukanizharadze.transferservice.model.TransactionStatus.SUCCESS
+        group by account.id, account.accountNumber, account.ownerName
+        order by count(tx.id) desc, account.id asc
+        """)
+
+    List<TopAccountResponse> findTopAccountsByTransactionCount(Pageable pageable);
+}
