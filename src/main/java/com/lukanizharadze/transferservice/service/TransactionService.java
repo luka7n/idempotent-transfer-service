@@ -14,6 +14,7 @@ import com.lukanizharadze.transferservice.model.TransactionStatus;
 import com.lukanizharadze.transferservice.repository.AccountRepository;
 import com.lukanizharadze.transferservice.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -52,6 +53,19 @@ public class TransactionService {
             throw new SameAccountTransactionException(request.fromAccountId());
         }
 
+        try {
+            return processTransfer(request, idempotencyKey);
+        } catch (DataIntegrityViolationException ex) {
+            // The check above cannot see a request with the same key that is still running. The
+            // unique key stops the second insert, and the request that lost answers with the
+            // stored result of the one that won.
+            Transaction winner = transactionRepository.findByIdempotencyKey(idempotencyKey)
+                    .orElseThrow(() -> ex);
+            return handleExistingTransaction(winner, request, idempotencyKey);
+        }
+    }
+
+    private TransactionResponse processTransfer(TransactionRequest request, String idempotencyKey) {
         try {
             return transferProcessor.process(request, idempotencyKey);
         } catch (TransactionRejectedException ex) {

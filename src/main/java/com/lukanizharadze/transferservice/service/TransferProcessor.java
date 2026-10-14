@@ -5,7 +5,6 @@ import com.lukanizharadze.transferservice.dto.TransactionResponse;
 import com.lukanizharadze.transferservice.entity.Account;
 import com.lukanizharadze.transferservice.entity.Transaction;
 import com.lukanizharadze.transferservice.exception.AccountNotFoundException;
-import com.lukanizharadze.transferservice.exception.IdempotencyException;
 import com.lukanizharadze.transferservice.exception.TransactionRejectedException;
 import com.lukanizharadze.transferservice.mapper.TransactionMapper;
 import com.lukanizharadze.transferservice.model.AccountStatus;
@@ -13,7 +12,6 @@ import com.lukanizharadze.transferservice.model.TransactionFailureReason;
 import com.lukanizharadze.transferservice.repository.AccountRepository;
 import com.lukanizharadze.transferservice.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,11 +49,8 @@ public class TransferProcessor {
         sourceAccount.debit(request.amount());
         destinationAccount.credit(request.amount());
 
-        Transaction transaction = saveTransaction(
-                sourceAccount,
-                destinationAccount,
-                request.amount(),
-                idempotencyKey
+        Transaction transaction = transactionRepository.saveAndFlush(
+                new Transaction(sourceAccount, destinationAccount, request.amount(), idempotencyKey)
         );
 
         return transactionMapper.toResponse(transaction);
@@ -83,20 +78,6 @@ public class TransferProcessor {
             throw new TransactionRejectedException(
                     TransactionFailureReason.INSUFFICIENT_FUNDS,
                     "Account " + sourceAccount.getId() + " does not have enough funds"
-            );
-        }
-    }
-
-    private Transaction saveTransaction(Account sourceAccount, Account destinationAccount, BigDecimal amount,
-                                        String idempotencyKey) {
-        try {
-            return transactionRepository.saveAndFlush(
-                    new Transaction(sourceAccount, destinationAccount, amount, idempotencyKey)
-            );
-        } catch (DataIntegrityViolationException ex) {
-            throw new IdempotencyException(
-                    "Idempotency key " + idempotencyKey + " is already in use",
-                    ex
             );
         }
     }

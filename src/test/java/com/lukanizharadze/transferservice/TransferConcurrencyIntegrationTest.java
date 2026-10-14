@@ -23,7 +23,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutionException;
@@ -126,6 +129,49 @@ class TransferConcurrencyIntegrationTest {
                 .singleElement()
                 .satisfies(failed -> assertThat(failed.getFailureReason())
                         .isEqualTo(TransactionFailureReason.INSUFFICIENT_FUNDS));
+    }
+
+    @Test
+    void concurrentRetriesWithTheSameKeyMoveMoneyOnceAndReturnTheSameTransaction() throws Exception {
+        Long sourceId = createAccount("Source Owner", "100.00", "TEST-SOURCE");
+        Long destinationId = createAccount("Destination Owner", "0.00", "TEST-DESTINATION");
+
+        List<Future<TransactionResponse>> retries = startTogether(Collections.nCopies(THREAD_COUNT,
+                transferTask(sourceId, destinationId, TRANSFER_AMOUNT, "concurrent-retry")));
+
+        Set<Long> transactionIds = new HashSet<>();
+        for (Future<TransactionResponse> retry : retries) {
+            transactionIds.add(retry.get(TIMEOUT_SECONDS, TimeUnit.SECONDS).id());
+        }
+
+        assertThat(transactionIds).hasSize(1);
+        assertThat(balanceOf(sourceId)).isEqualByComparingTo("20.00");
+        assertThat(balanceOf(destinationId)).isEqualByComparingTo("80.00");
+        assertThat(transactionRepository.findAll())
+                .singleElement()
+                .satisfies(success -> assertThat(success.getStatus()).isEqualTo(TransactionStatus.SUCCESS));
+    }
+
+    @Test
+    void concurrentRetriesOfARejectedTransferAllReturnTheSameRejection() throws Exception {
+        Long sourceId = createAccount("Source Owner", "50.00", "TEST-SOURCE");
+        Long destinationId = createAccount("Destination Owner", "0.00", "TEST-DESTINATION");
+
+        List<Future<TransactionResponse>> retries = startTogether(Collections.nCopies(THREAD_COUNT,
+                transferTask(sourceId, destinationId, TRANSFER_AMOUNT, "concurrent-rejected-retry")));
+
+        for (Future<TransactionResponse> retry : retries) {
+            assertThatThrownBy(() -> retry.get(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+                    .cause()
+                    .isInstanceOfSatisfying(TransactionRejectedException.class, rejected ->
+                            assertThat(rejected.getReason()).isEqualTo(TransactionFailureReason.INSUFFICIENT_FUNDS));
+        }
+
+        assertThat(balanceOf(sourceId)).isEqualByComparingTo("50.00");
+        assertThat(balanceOf(destinationId)).isEqualByComparingTo("0.00");
+        assertThat(transactionRepository.findAll())
+                .singleElement()
+                .satisfies(failed -> assertThat(failed.getStatus()).isEqualTo(TransactionStatus.FAILED));
     }
 
     @Test
