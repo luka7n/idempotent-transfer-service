@@ -236,6 +236,6 @@ Errors use Spring `ProblemDetail` and include a `code` field.
 ./gradlew test
 ```
 
-Docker must be running. There are 22 integration tests. Testcontainers starts PostgreSQL 17, Flyway
+Docker must be running. There are 23 integration tests. Testcontainers starts PostgreSQL 17, Flyway
 applies the migration and the tests run through the real Spring context. GitHub Actions runs
 `./gradlew build` after every push and pull request.

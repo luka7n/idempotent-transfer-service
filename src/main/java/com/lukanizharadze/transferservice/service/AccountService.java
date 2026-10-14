@@ -10,6 +10,7 @@ import com.lukanizharadze.transferservice.mapper.AccountMapper;
 import com.lukanizharadze.transferservice.model.AccountStatus;
 import com.lukanizharadze.transferservice.repository.AccountRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,7 +41,7 @@ public class AccountService {
 
     @Transactional(readOnly = true)
     public List<AccountResponse> findAccounts() {
-        return accountRepository.findAll().stream()
+        return accountRepository.findAll(Sort.by("id")).stream()
                 .map(accountMapper::toResponse).toList();
     }
 
